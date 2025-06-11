@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Strategery Web</title>
+    <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+    <div id="game-container">
+        <div id="game-board"></div>
+        <div id="game-ui">
+            <div id="turn-info">
+                <h2>Current Turn: <span id="current-player">Player 1</span></h2>
+                <p>Phase: <span id="current-phase">Reinforcement</span></p>
+            </div>
+            <div id="game-controls">
+                <button id="end-turn-btn" disabled>End Turn</button>
+            </div>
+        </div>
+    </div>
+    <script src="js/game.js" type="module"></script>
+    <script src="js/map-generator.js" type="module"></script>
+    <script src="js/renderer.js" type="module"></script>
+    <script src="js/ai-player.js" type="module"></script>
+    <script src="js/main.js" type="module"></script>
+</body>
+</html> 
