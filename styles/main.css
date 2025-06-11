@@ -15,69 +15,63 @@
 }
 
 body {
-    background-color: var(--background-color);
-    color: var(--text-color);
     font-family: Arial, sans-serif;
-    min-height: 100vh;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-}
-
-#game-container {
-    width: 100%;
-    max-width: 1200px;
-    margin: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-}
-
-#game-board {
-    aspect-ratio: 16/9;
     background-color: #1a1a1a;
-    border: 2px solid var(--border-color);
-    border-radius: 8px;
-    position: relative;
+    color: #fff;
     overflow: hidden;
 }
 
-#game-ui {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 10px;
-    background-color: #2a2a2a;
+.game-container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+}
+
+#gameCanvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #1a1a1a;
+}
+
+.game-ui {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    background-color: rgba(0, 0, 0, 0.7);
+    padding: 15px;
     border-radius: 8px;
+    z-index: 1000;
 }
 
-#turn-info {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
+#current-player, #current-phase {
+    margin-bottom: 10px;
+    font-size: 16px;
 }
 
-#game-controls {
-    display: flex;
-    gap: 10px;
-}
-
-button {
-    padding: 8px 16px;
-    background-color: #444;
-    color: var(--text-color);
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
+#end-turn-btn {
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 16px;
+    margin: 4px 2px;
     cursor: pointer;
-    transition: background-color 0.2s;
+    border-radius: 4px;
+    transition: background-color 0.3s;
 }
 
-button:hover:not(:disabled) {
-    background-color: #555;
+#end-turn-btn:hover {
+    background-color: #45a049;
 }
 
-button:disabled {
-    opacity: 0.5;
+#end-turn-btn:disabled {
+    background-color: #cccccc;
     cursor: not-allowed;
 }
 

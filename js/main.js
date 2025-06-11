@@ -1,164 +1,98 @@
 import { game } from './game.js';
 import { MapGenerator } from './map-generator.js';
-import { GameRenderer } from './renderer.js';
-import { AIPlayer } from './ai-player.js';
+import { Renderer } from './renderer.js';
+import { AI } from './ai.js';
 
-class Game {
-    constructor() {
-        this.gameBoard = document.getElementById('game-board');
-        this.currentPlayerElement = document.getElementById('current-player');
-        this.currentPhaseElement = document.getElementById('current-phase');
-        this.endTurnButton = document.getElementById('end-turn-btn');
-        
-        this.renderer = new GameRenderer(this.gameBoard);
-        this.aiPlayers = new Map();
-        
-        this.initializeGame();
-        this.setupEventListeners();
-    }
+// Initialize game
+const canvas = document.getElementById('gameCanvas');
+const mapGenerator = new MapGenerator(canvas.width, canvas.height);
+const renderer = new Renderer(canvas);
+const ai = new AI();
 
-    initializeGame() {
-        // Clear any existing game state
-        game.players = [];
-        game.territories.clear();
-        
-        // Add players
-        game.addPlayer('#ff4444'); // Human player
-        game.addPlayer('#4444ff', true, 'medium'); // AI player
-        
-        // Initialize AI players
-        game.players.forEach(player => {
-            if (player.isAI) {
-                this.aiPlayers.set(player.id, new AIPlayer(player.aiDifficulty));
+// Set up game state
+game.initialize(mapGenerator, renderer, ai);
+
+// Handle window resize
+window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    mapGenerator.width = canvas.width;
+    mapGenerator.height = canvas.height;
+    game.initialize(mapGenerator, renderer, ai);
+});
+
+// Handle canvas click
+canvas.addEventListener('click', (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    
+    // Find clicked territory
+    const clickedTerritory = game.territories.find(territory => {
+        const bounds = territory.getBounds();
+        return x >= bounds.x && x <= bounds.x + bounds.width &&
+               y >= bounds.y && y <= bounds.y + bounds.height;
+    });
+
+    if (clickedTerritory) {
+        if (game.currentPhase === 'reinforcement') {
+            if (clickedTerritory.owner === game.currentPlayer.id && game.availableReinforcements > 0) {
+                game.setArmies(clickedTerritory.id, clickedTerritory.armies + 1);
+                game.availableReinforcements--;
+                game.updateUI();
+                renderer.render();
+
+                // If no more reinforcements, switch to attack phase
+                if (game.availableReinforcements === 0) {
+                    game.currentPhase = 'attack';
+                    game.updateUI();
+                }
             }
-        });
+        } else if (game.currentPhase === 'attack') {
+            if (!game.attackSource) {
+                if (clickedTerritory.owner === game.currentPlayer.id && clickedTerritory.armies > 1) {
+                    game.attackSource = clickedTerritory.id;
+                    renderer.render();
+                }
+            } else {
+                if (game.canAttack(game.attackSource, clickedTerritory.id)) {
+                    const success = game.resolveCombat(game.attackSource, clickedTerritory.id);
+                    renderer.showAttackAnimation(game.attackSource, clickedTerritory.id, success);
+                    game.attackSource = null;
+                    renderer.render();
 
-        // Generate map
-        const mapGenerator = new MapGenerator(
-            this.gameBoard.clientWidth,
-            this.gameBoard.clientHeight
-        );
-        const territories = mapGenerator.generateMap();
-
-        // Randomly assign territories and initial armies
-        const shuffledTerritories = [...territories].sort(() => Math.random() - 0.5);
-        const territoriesPerPlayer = Math.floor(shuffledTerritories.length / game.players.length);
-        
-        game.players.forEach((player, index) => {
-            const startIndex = index * territoriesPerPlayer;
-            const endIndex = index === game.players.length - 1 ? 
-                shuffledTerritories.length : 
-                (index + 1) * territoriesPerPlayer;
-            
-            for (let i = startIndex; i < endIndex; i++) {
-                const territory = shuffledTerritories[i];
-                game.assignTerritory(territory.id, player.id);
-                game.setArmies(territory.id, 2); // Start with 2 armies per territory
+                    // Check for win condition
+                    const winner = game.checkWinCondition();
+                    if (winner) {
+                        alert(`Game Over! ${winner.isAI ? 'AI' : 'Player'} ${winner.id} wins!`);
+                        game.initialize(mapGenerator, renderer, ai);
+                    }
+                }
             }
-        });
-
-        // Render initial state
-        territories.forEach(territory => {
-            this.renderer.renderTerritory(territory);
-        });
-
-        this.updateUI();
-    }
-
-    setupEventListeners() {
-        this.endTurnButton.addEventListener('click', () => this.endTurn());
-        
-        // Handle window resize
-        window.addEventListener('resize', () => {
-            this.renderer.clear();
-            this.initializeGame();
-        });
-    }
-
-    updateUI() {
-        const currentPlayer = game.currentPlayer;
-        this.currentPlayerElement.textContent = `Player ${currentPlayer.id}`;
-        this.currentPhaseElement.textContent = game.currentPhase.charAt(0).toUpperCase() + 
-            game.currentPhase.slice(1);
-        
-        // Enable/disable end turn button based on phase
-        this.endTurnButton.disabled = game.currentPhase === 'reinforcement';
-        
-        // Check for win condition
-        const winner = game.checkWinCondition();
-        if (winner) {
-            this.showGameOver(winner);
         }
     }
+});
 
-    endTurn() {
-        if (game.currentPhase === 'attack') {
-            game.nextTurn();
-            this.updateUI();
-            
-            // If next player is AI, make their move
-            if (game.currentPlayer.isAI) {
-                this.makeAIMove();
-            }
-        } else if (game.currentPhase === 'reinforcement') {
-            game.currentPhase = 'attack';
-            this.updateUI();
+// Handle end turn button
+document.getElementById('end-turn-btn').addEventListener('click', () => {
+    if (game.currentPhase === 'attack') {
+        game.nextTurn();
+        renderer.render();
+
+        // If next player is AI, make their move
+        if (game.currentPlayer.isAI) {
+            setTimeout(() => {
+                ai.makeMove();
+                renderer.render();
+            }, 1000);
         }
     }
+});
 
-    makeAIMove() {
-        const aiPlayer = this.aiPlayers.get(game.currentPlayer.id);
-        if (!aiPlayer) return;
-
-        // AI makes its reinforcement move
-        aiPlayer.makeMove();
-        this.renderer.updateAllTerritories();
-        
-        // Switch to attack phase
-        game.currentPhase = 'attack';
-        this.updateUI();
-        
-        // AI makes its attack moves
-        let attackCount = 0;
-        const maxAttacks = 3; // Limit number of attacks per turn
-        
-        const makeAttack = () => {
-            if (attackCount >= maxAttacks) {
-                this.endTurn();
-                return;
-            }
-            
-            aiPlayer.makeMove();
-            this.renderer.updateAllTerritories();
-            
-            // Check if game is over
-            if (game.checkWinCondition()) {
-                this.showGameOver(game.checkWinCondition());
-                return;
-            }
-            
-            attackCount++;
-            setTimeout(makeAttack, 1000); // Add delay between attacks
-        };
-        
-        makeAttack();
-    }
-
-    showGameOver(winner) {
-        const message = winner.isAI ? 
-            `Game Over! AI Player ${winner.id} wins!` :
-            `Game Over! Player ${winner.id} wins!`;
-            
-        alert(message);
-        
-        // Reset game after a delay
-        setTimeout(() => {
-            this.initializeGame();
-        }, 2000);
-    }
+// Start game loop
+function gameLoop() {
+    renderer.render();
+    requestAnimationFrame(gameLoop);
 }
 
-// Start the game when the page loads
-window.addEventListener('load', () => {
-    new Game();
-}); 
+gameLoop(); 

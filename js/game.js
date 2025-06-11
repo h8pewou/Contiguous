@@ -1,72 +1,145 @@
 // Game state management
-class GameState {
+class Game {
     constructor() {
         this.players = [];
-        this.territories = new Map();
+        this.territories = [];
         this.currentPlayerIndex = 0;
         this.currentPhase = 'reinforcement';
         this.selectedTerritory = null;
         this.attackSource = null;
+        this.availableReinforcements = 0;
+    }
+
+    initialize(mapGenerator, renderer, ai) {
+        // Clear any existing game state
+        this.players = [];
+        this.territories = [];
+        this.currentPlayerIndex = 0;
+        this.currentPhase = 'reinforcement';
+        this.selectedTerritory = null;
+        this.attackSource = null;
+        this.availableReinforcements = 0;
+
+        // Add players
+        this.addPlayer('#ff4444'); // Human player
+        this.addPlayer('#4444ff', true, 'medium'); // AI player
+
+        // Generate map
+        const territories = mapGenerator.generateMap();
+        this.territories = territories;
+
+        // Randomly assign territories and initial armies
+        const shuffledTerritories = [...territories].sort(() => Math.random() - 0.5);
+        const territoriesPerPlayer = Math.floor(shuffledTerritories.length / this.players.length);
+
+        this.players.forEach((player, index) => {
+            const startIndex = index * territoriesPerPlayer;
+            const endIndex = index === this.players.length - 1 ? 
+                shuffledTerritories.length : 
+                (index + 1) * territoriesPerPlayer;
+
+            for (let i = startIndex; i < endIndex; i++) {
+                const territory = shuffledTerritories[i];
+                this.assignTerritory(territory.id, player.id);
+                this.setArmies(territory.id, 2); // Start with 2 armies per territory
+            }
+        });
+
+        // Calculate initial reinforcements
+        this.calculateReinforcements();
+
+        // Update UI
+        this.updateUI();
+    }
+
+    addPlayer(color, isAI = false, aiDifficulty = 'medium') {
+        const player = {
+            id: this.players.length + 1,
+            color: color,
+            isAI: isAI,
+            aiDifficulty: aiDifficulty
+        };
+        this.players.push(player);
+        return player;
     }
 
     get currentPlayer() {
         return this.players[this.currentPlayerIndex];
     }
 
-    addPlayer(color, isAI = false, aiDifficulty = null) {
-        const player = {
-            id: this.players.length + 1,
-            color,
-            isAI,
-            aiDifficulty,
-            territories: new Set()
-        };
-        this.players.push(player);
-        return player;
-    }
-
-    addTerritory(id, x, y, width, height, neighbors = []) {
-        const territory = {
-            id,
-            x,
-            y,
-            width,
-            height,
-            neighbors,
-            owner: null,
-            armies: 0
-        };
-        this.territories.set(id, territory);
-        return territory;
-    }
-
     assignTerritory(territoryId, playerId) {
-        const territory = this.territories.get(territoryId);
-        if (!territory) return false;
-
-        // Remove from previous owner if any
-        if (territory.owner) {
-            const prevOwner = this.players.find(p => p.id === territory.owner);
-            if (prevOwner) {
-                prevOwner.territories.delete(territoryId);
-            }
+        const territory = this.territories.find(t => t.id === territoryId);
+        if (territory) {
+            territory.owner = playerId;
         }
-
-        // Assign to new owner
-        territory.owner = playerId;
-        const newOwner = this.players.find(p => p.id === playerId);
-        if (newOwner) {
-            newOwner.territories.add(territoryId);
-        }
-
-        return true;
     }
 
     setArmies(territoryId, count) {
-        const territory = this.territories.get(territoryId);
-        if (!territory) return false;
-        territory.armies = Math.max(1, Math.min(12, count)); // Ensure between 1 and 12
+        const territory = this.territories.find(t => t.id === territoryId);
+        if (territory) {
+            territory.armies = Math.max(1, count); // Ensure minimum of 1 army
+        }
+    }
+
+    calculateReinforcements() {
+        const player = this.currentPlayer;
+        const playerTerritories = this.territories.filter(t => t.owner === player.id);
+        this.availableReinforcements = Math.max(2, Math.floor(playerTerritories.length / 3));
+    }
+
+    canAttack(sourceId, targetId) {
+        const source = this.territories.find(t => t.id === sourceId);
+        const target = this.territories.find(t => t.id === targetId);
+
+        if (!source || !target) return false;
+        if (source.owner !== this.currentPlayer.id) return false;
+        if (target.owner === this.currentPlayer.id) return false;
+        if (source.armies <= 1) return false;
+        if (!source.neighbors.includes(targetId)) return false;
+
         return true;
+    }
+
+    resolveCombat(sourceId, targetId) {
+        const source = this.territories.find(t => t.id === sourceId);
+        const target = this.territories.find(t => t.id === targetId);
+
+        if (!source || !target) return false;
+
+        // Calculate combat strength
+        const attackerRoll = Math.floor(Math.random() * 6) + 1;
+        const defenderRoll = Math.floor(Math.random() * 6) + 1;
+        
+        // Add army size bonus (1 point per 2 armies, rounded down)
+        const attackerBonus = Math.floor(source.armies / 2);
+        const defenderBonus = Math.floor(target.armies / 2);
+        
+        const attackerTotal = attackerRoll + attackerBonus;
+        const defenderTotal = defenderRoll + defenderBonus;
+
+        if (attackerTotal > defenderTotal) {
+            // Attacker wins
+            target.owner = source.owner;
+            target.armies = source.armies - 1;
+            source.armies = 1;
+            return true;
+        } else {
+            // Defender wins
+            source.armies = 1;
+            
+            // Calculate defender losses based on the margin of victory
+            const margin = defenderTotal - attackerTotal;
+            const defenderLosses = Math.min(
+                Math.floor(margin / 2), // 1 loss per 2 points of margin
+                target.armies - 1 // Don't reduce below 1 army
+            );
+            
+            if (defenderLosses > 0) {
+                target.armies -= defenderLosses;
+            }
+            
+            return false;
+        }
     }
 
     nextTurn() {
@@ -75,79 +148,32 @@ class GameState {
         this.selectedTerritory = null;
         this.attackSource = null;
         this.calculateReinforcements();
+        this.updateUI();
     }
 
-    calculateReinforcements() {
-        const player = this.currentPlayer;
-        const territoryCount = player.territories.size;
-        return Math.max(2, Math.floor(territoryCount / 3));
-    }
+    updateUI() {
+        const currentPlayerElement = document.getElementById('current-player');
+        const currentPhaseElement = document.getElementById('current-phase');
+        const endTurnButton = document.getElementById('end-turn-btn');
 
-    canAttack(sourceId, targetId) {
-        const source = this.territories.get(sourceId);
-        const target = this.territories.get(targetId);
-        
-        if (!source || !target) return false;
-        if (source.owner !== this.currentPlayer.id) return false;
-        if (target.owner === this.currentPlayer.id) return false;
-        if (!source.neighbors.includes(targetId)) return false;
-        if (source.armies <= 1) return false;
+        currentPlayerElement.textContent = `Player ${this.currentPlayer.id} (${this.availableReinforcements} reinforcements)`;
+        currentPhaseElement.textContent = this.currentPhase.charAt(0).toUpperCase() + 
+            this.currentPhase.slice(1);
 
-        return true;
-    }
-
-    resolveCombat(attackerId, defenderId) {
-        const attacker = this.territories.get(attackerId);
-        const defender = this.territories.get(defenderId);
-        
-        if (!this.canAttack(attackerId, defenderId)) return false;
-
-        const attackerDice = Array(attacker.armies - 1).fill(0)
-            .map(() => Math.floor(Math.random() * 6) + 1);
-        const defenderDice = Array(defender.armies).fill(0)
-            .map(() => Math.floor(Math.random() * 6) + 1);
-
-        const attackerSum = attackerDice.reduce((a, b) => a + b, 0);
-        const defenderSum = defenderDice.reduce((a, b) => a + b, 0);
-
-        if (attackerSum > defenderSum) {
-            // Attacker wins
-            this.assignTerritory(defenderId, attacker.owner);
-            this.setArmies(defenderId, attacker.armies - 1);
-            this.setArmies(attackerId, 1);
-            return true;
-        } else if (attackerSum < defenderSum) {
-            // Defender wins
-            this.setArmies(defenderId, defender.armies - (attacker.armies - 1));
-            this.setArmies(attackerId, 1);
-            return false;
-        } else {
-            // Tie - defender wins if equal armies, otherwise smaller force wins
-            if (attacker.armies <= defender.armies) {
-                this.setArmies(defenderId, defender.armies - (attacker.armies - 1));
-                this.setArmies(attackerId, 1);
-                return false;
-            } else {
-                this.assignTerritory(defenderId, attacker.owner);
-                this.setArmies(defenderId, attacker.armies - 1);
-                this.setArmies(attackerId, 1);
-                return true;
-            }
-        }
+        endTurnButton.disabled = this.currentPhase === 'reinforcement' && this.availableReinforcements > 0;
     }
 
     checkWinCondition() {
-        const activePlayers = this.players.filter(p => p.territories.size > 0);
-        return activePlayers.length === 1 ? activePlayers[0] : null;
+        const firstOwner = this.territories[0]?.owner;
+        if (!firstOwner) return null;
+
+        const allSameOwner = this.territories.every(t => t.owner === firstOwner);
+        if (allSameOwner) {
+            return this.players.find(p => p.id === firstOwner);
+        }
+
+        return null;
     }
 }
 
-// Game initialization
-const game = new GameState();
-
-// Add players
-game.addPlayer('#ff4444'); // Player 1 (Human)
-game.addPlayer('#4444ff', true, 'medium'); // Player 2 (AI)
-
-// Export for use in other modules
-export { game, GameState }; 
+export const game = new Game(); 

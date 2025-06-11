@@ -1,141 +1,97 @@
 import { game } from './game.js';
 
-class GameRenderer {
-    constructor(container) {
-        this.container = container;
-        this.svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        this.svg.setAttribute('width', '100%');
-        this.svg.setAttribute('height', '100%');
-        this.container.appendChild(this.svg);
-        
-        this.territoryElements = new Map();
-        this.attackLine = null;
+class Renderer {
+    constructor(canvas) {
+        this.canvas = canvas;
+        this.ctx = canvas.getContext('2d');
+        this.armyCircleRadius = 4;
+        this.armyCircleSpacing = 6;
     }
 
-    renderTerritory(territory) {
-        const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        group.setAttribute('data-territory-id', territory.id);
-        group.classList.add('territory');
-
-        // Create territory shape
-        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        rect.setAttribute('x', territory.x);
-        rect.setAttribute('y', territory.y);
-        rect.setAttribute('width', territory.width);
-        rect.setAttribute('height', territory.height);
-        rect.setAttribute('rx', '10');
-        rect.setAttribute('ry', '10');
-        group.appendChild(rect);
-
-        // Create army circles container
-        const circlesContainer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        circlesContainer.classList.add('army-circles');
-        
-        // Create 12 circles in a honeycomb pattern
-        for (let i = 0; i < 12; i++) {
-            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            const row = Math.floor(i / 4);
-            const col = i % 4;
-            const spacing = 8;
-            const startX = territory.x + (territory.width - (3 * spacing)) / 2;
-            const startY = territory.y + (territory.height - (3 * spacing)) / 2;
-            
-            circle.setAttribute('cx', startX + col * spacing);
-            circle.setAttribute('cy', startY + row * spacing);
-            circle.setAttribute('r', '3');
-            circle.classList.add('army-circle');
-            circlesContainer.appendChild(circle);
-        }
-        
-        group.appendChild(circlesContainer);
-        this.svg.appendChild(group);
-        this.territoryElements.set(territory.id, group);
-
-        // Add click handler
-        group.addEventListener('click', () => this.handleTerritoryClick(territory.id));
-
-        this.updateTerritory(territory);
+    render() {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.renderTerritories();
+        this.renderArmies();
     }
 
-    updateTerritory(territory) {
-        const element = this.territoryElements.get(territory.id);
-        if (!element) return;
+    renderTerritories() {
+        game.territories.forEach(territory => {
+            // Draw territory
+            this.ctx.beginPath();
+            territory.points.forEach((point, index) => {
+                if (index === 0) {
+                    this.ctx.moveTo(point.x, point.y);
+                } else {
+                    this.ctx.lineTo(point.x, point.y);
+                }
+            });
+            this.ctx.closePath();
 
-        const rect = element.querySelector('rect');
-        const circles = element.querySelectorAll('.army-circle');
-        const owner = game.players.find(p => p.id === territory.owner);
+            // Set territory color based on owner
+            const owner = game.players.find(p => p.id === territory.owner);
+            this.ctx.fillStyle = owner ? owner.color : '#666';
+            this.ctx.fill();
 
-        // Update territory color
-        rect.style.fill = owner ? owner.color : '#666';
-        rect.style.stroke = territory.id === game.selectedTerritory ? '#fff' : '#999';
-
-        // Update army circles
-        circles.forEach((circle, index) => {
-            circle.classList.toggle('filled', index < territory.armies);
-            circle.style.fill = owner ? owner.color : 'none';
+            // Draw border
+            this.ctx.strokeStyle = territory.id === game.attackSource ? '#fff' : '#999';
+            this.ctx.lineWidth = territory.id === game.attackSource ? 2 : 1;
+            this.ctx.stroke();
         });
-
-        // Update selection state
-        element.classList.toggle('selected', territory.id === game.selectedTerritory);
     }
 
-    handleTerritoryClick(territoryId) {
-        const territory = game.territories.get(territoryId);
-        if (!territory) return;
+    renderArmies() {
+        game.territories.forEach(territory => {
+            if (territory.armies > 0) {
+                // Calculate the grid dimensions for the army circles
+                const circlesPerRow = 4;
+                const rows = Math.ceil(territory.armies / circlesPerRow);
+                
+                // Calculate the starting position to center the grid
+                const totalWidth = (circlesPerRow - 1) * this.armyCircleSpacing;
+                const totalHeight = (rows - 1) * this.armyCircleSpacing;
+                const startX = territory.centerX - totalWidth / 2;
+                const startY = territory.centerY - totalHeight / 2;
 
-        if (game.currentPhase === 'reinforcement') {
-            if (territory.owner === game.currentPlayer.id) {
-                game.setArmies(territoryId, territory.armies + 1);
-                this.updateTerritory(territory);
-            }
-        } else if (game.currentPhase === 'attack') {
-            if (!game.attackSource) {
-                if (territory.owner === game.currentPlayer.id && territory.armies > 1) {
-                    game.attackSource = territoryId;
-                    this.updateTerritory(territory);
+                // Draw each army circle
+                for (let i = 0; i < territory.armies; i++) {
+                    const row = Math.floor(i / circlesPerRow);
+                    const col = i % circlesPerRow;
+                    
+                    const x = startX + col * this.armyCircleSpacing;
+                    const y = startY + row * this.armyCircleSpacing;
+
+                    this.ctx.beginPath();
+                    this.ctx.arc(x, y, this.armyCircleRadius, 0, Math.PI * 2);
+                    
+                    // Set circle color based on owner
+                    const owner = game.players.find(p => p.id === territory.owner);
+                    this.ctx.fillStyle = owner ? owner.color : '#fff';
+                    this.ctx.fill();
+                    this.ctx.strokeStyle = '#000';
+                    this.ctx.lineWidth = 1;
+                    this.ctx.stroke();
                 }
-            } else {
-                if (game.canAttack(game.attackSource, territoryId)) {
-                    const success = game.resolveCombat(game.attackSource, territoryId);
-                    this.showAttackAnimation(game.attackSource, territoryId, success);
-                    game.attackSource = null;
-                    this.updateAllTerritories();
-                }
             }
-        }
+        });
     }
 
     showAttackAnimation(sourceId, targetId, success) {
-        const source = game.territories.get(sourceId);
-        const target = game.territories.get(targetId);
+        const source = game.territories.find(t => t.id === sourceId);
+        const target = game.territories.find(t => t.id === targetId);
         
         if (!source || !target) return;
 
-        // Create attack line
-        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        line.setAttribute('x1', source.x + source.width/2);
-        line.setAttribute('y1', source.y + source.height/2);
-        line.setAttribute('x2', target.x + target.width/2);
-        line.setAttribute('y2', target.y + target.height/2);
-        line.classList.add('attack-line');
-        this.svg.appendChild(line);
+        // Draw attack line
+        this.ctx.beginPath();
+        this.ctx.moveTo(source.centerX, source.centerY);
+        this.ctx.lineTo(target.centerX, target.centerY);
+        this.ctx.strokeStyle = success ? '#0f0' : '#f00';
+        this.ctx.lineWidth = 2;
+        this.ctx.stroke();
 
-        // Remove line after animation
-        setTimeout(() => {
-            this.svg.removeChild(line);
-        }, 1000);
-    }
-
-    updateAllTerritories() {
-        game.territories.forEach(territory => {
-            this.updateTerritory(territory);
-        });
-    }
-
-    clear() {
-        this.svg.innerHTML = '';
-        this.territoryElements.clear();
+        // Clear the line after a short delay
+        setTimeout(() => this.render(), 500);
     }
 }
 
-export { GameRenderer }; 
+export { Renderer }; 
