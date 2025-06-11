@@ -1,230 +1,220 @@
 import { game } from './game.js';
 
 class MapGenerator {
-    constructor(width, height) {
-        this.width = width;
-        this.height = height;
-        this.hexSize = 25; // Further reduced from 30 to 25
+    constructor() {
+        this.width = window.innerWidth;
+        this.height = window.innerHeight;
+        this.hexSize = 25; // You can adjust this for larger/smaller hexes
         this.hexHeight = this.hexSize * Math.sqrt(3);
         this.hexWidth = this.hexSize * 2;
-        this.territoryCount = 20;
+        this.territories = [];
     }
 
     generateMap() {
-        // Calculate grid dimensions
-        const cols = Math.floor(this.width / (this.hexWidth * 0.75));
-        const rows = Math.floor(this.height / this.hexHeight);
+        // Generate a larger grid than needed
+        const cols = Math.ceil(this.width / (this.hexWidth * 0.75)) + 4;
+        const rows = Math.ceil(this.height / this.hexHeight) + 4;
         
-        // Create hexagonal grid
-        const hexagons = [];
-        for (let row = 0; row < rows; row++) {
-            for (let col = 0; col < cols; col++) {
-                const x = col * this.hexWidth * 0.75;
-                const y = row * this.hexHeight + (col % 2) * (this.hexHeight / 2);
+        // Create the full grid first
+        this.createFullGrid(cols, rows);
+        
+        // Remove the last two columns and rows
+        this.removeOuterTerritories();
+        
+        // Calculate neighbors and ensure connectivity
+        this.calculateNeighbors();
+        this.ensureConnectivity();
+        
+        return this.territories;
+    }
+
+    createFullGrid(cols, rows) {
+        const grid = [];
+        
+        // Calculate the total width and height of the grid
+        const totalWidth = cols * this.hexWidth * 0.75;
+        const totalHeight = rows * this.hexHeight;
+        
+        // Calculate the starting position to center the grid
+        const startX = (this.width - totalWidth) / 2;
+        const startY = (this.height - totalHeight) / 2;
+        
+        for (let col = 0; col < cols; col++) {
+            for (let row = 0; row < rows; row++) {
+                // Calculate position with centering offset
+                const x = startX + col * this.hexWidth * 0.75;
+                const y = startY + row * this.hexHeight + (col % 2) * (this.hexHeight / 2);
                 
-                // Only add hexagons that are mostly within the game board
-                if (x > -this.hexWidth && x < this.width && y > -this.hexHeight && y < this.height) {
-                    const points = this.generateHexagonPoints(x, y);
-                    const bounds = this.calculateBounds(points);
-                    
-                    hexagons.push({
-                        id: hexagons.length + 1,
-                        x,
-                        y,
-                        row,
-                        col,
-                        points,
-                        centerX: x,
-                        centerY: y,
-                        owner: null,
-                        armies: 0,
-                        getBounds: () => bounds
-                    });
-                }
+                grid.push({
+                    id: grid.length,
+                    x: x,
+                    y: y,
+                    armies: 0,
+                    owner: null,
+                    neighbors: [],
+                    centerX: x,
+                    centerY: y,
+                    col: col,  // Store column and row for filtering
+                    row: row
+                });
             }
         }
-
-        // Create a more compact grid by removing some hexagons
-        const compactHexagons = this.createCompactGrid(hexagons);
         
-        // Select territories in a more structured way
-        const territories = this.selectTerritories(compactHexagons);
-
-        // Calculate neighbors
-        this.calculateNeighbors(territories, compactHexagons);
-
-        // Ensure all territories are connected
-        this.ensureConnectivity(territories);
-
-        return territories;
+        this.territories = grid;
     }
 
-    createCompactGrid(hexagons) {
-        // Create a more compact grid by removing some hexagons
-        const compactHexagons = [];
-        const centerX = this.width / 2;
-        const centerY = this.height / 2;
-        const maxDistance = Math.min(this.width, this.height) * 0.3; // Reduced from 0.4 to 0.3
+    removeOuterTerritories() {
+        // Find the maximum column and row
+        const maxCol = Math.max(...this.territories.map(t => t.col));
+        const maxRow = Math.max(...this.territories.map(t => t.row));
+        
+        // Remove territories in the last two columns and rows
+        this.territories = this.territories.filter(territory => 
+            territory.col < maxCol - 1 && territory.row < maxRow - 1
+        );
+        
+        // Reassign IDs to be sequential
+        this.territories.forEach((territory, index) => {
+            territory.id = index;
+        });
+    }
 
-        hexagons.forEach(hex => {
-            const dx = hex.centerX - centerX;
-            const dy = hex.centerY - centerY;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            
-            if (distance <= maxDistance) {
-                compactHexagons.push(hex);
+    filterTerritories() {
+        // Filter out territories that are outside the screen
+        this.territories = this.territories.filter(territory => {
+            // Calculate the corners of the hexagon
+            const corners = [];
+            for (let i = 0; i < 6; i++) {
+                const angle = (i * Math.PI) / 3;
+                const cornerX = territory.x + this.hexWidth * Math.cos(angle);
+                const cornerY = territory.y + this.hexHeight * Math.sin(angle);
+                corners.push({ x: cornerX, y: cornerY });
             }
+            
+            // Check if any corner is outside the screen
+            const isOutside = corners.some(corner => 
+                corner.x < 0 || 
+                corner.x > this.width || 
+                corner.y < 0 || 
+                corner.y > this.height
+            );
+            
+            return !isOutside;
         });
-
-        return compactHexagons;
+        
+        // Reassign IDs to be sequential
+        this.territories.forEach((territory, index) => {
+            territory.id = index;
+        });
     }
 
-    selectTerritories(hexagons) {
-        // Sort hexagons by distance from center
-        const centerX = this.width / 2;
-        const centerY = this.height / 2;
-        const sortedHexagons = [...hexagons].sort((a, b) => {
-            const distA = Math.sqrt(
-                Math.pow(a.centerX - centerX, 2) + 
-                Math.pow(a.centerY - centerY, 2)
-            );
-            const distB = Math.sqrt(
-                Math.pow(b.centerX - centerX, 2) + 
-                Math.pow(b.centerY - centerY, 2)
-            );
-            return distA - distB;
-        });
-
-        // Take the closest hexagons up to territoryCount
-        return sortedHexagons.slice(0, this.territoryCount);
-    }
-
-    generateHexagonPoints(centerX, centerY) {
-        const points = [];
+    isHexagonInBounds(x, y) {
+        // Calculate the radius of the hexagon with safety margin
+        const radius = this.hexWidth * 1.1; // Add 10% safety margin
+        
+        // Check if the hexagon's center is far enough from the edges
+        const minX = radius;
+        const maxX = this.width - radius;
+        const minY = radius;
+        const maxY = this.height - radius;
+        
+        // First check if the center is in bounds
+        if (x < minX || x > maxX || y < minY || y > maxY) {
+            return false;
+        }
+        
+        // Then check all corners with safety margin
         for (let i = 0; i < 6; i++) {
             const angle = (i * Math.PI) / 3;
-            const x = centerX + this.hexSize * Math.cos(angle);
-            const y = centerY + this.hexSize * Math.sin(angle);
-            points.push({ x, y });
-        }
-        return points;
-    }
-
-    calculateBounds(points) {
-        let minX = Infinity, minY = Infinity;
-        let maxX = -Infinity, maxY = -Infinity;
-
-        points.forEach(point => {
-            minX = Math.min(minX, point.x);
-            minY = Math.min(minY, point.y);
-            maxX = Math.max(maxX, point.x);
-            maxY = Math.max(maxY, point.y);
-        });
-
-        return {
-            x: minX,
-            y: minY,
-            width: maxX - minX,
-            height: maxY - minY
-        };
-    }
-
-    calculateNeighbors(territories, allHexagons) {
-        // For each territory, find its neighbors in the hexagonal grid
-        territories.forEach(territory => {
-            territory.neighbors = [];
+            const cornerX = x + radius * Math.cos(angle);
+            const cornerY = y + radius * Math.sin(angle);
             
-            // Get the row and column of the current territory
-            const row = territory.row;
-            const col = territory.col;
-            const isEvenRow = col % 2 === 0;
-
-            // Define the six possible neighbor positions in a hexagonal grid
-            const neighborOffsets = isEvenRow ? [
-                { row: -1, col: 0 },  // top
-                { row: -1, col: 1 },  // top-right
-                { row: 0, col: 1 },   // right
-                { row: 1, col: 0 },   // bottom
-                { row: 0, col: -1 },  // left
-                { row: -1, col: -1 }  // top-left
-            ] : [
-                { row: -1, col: 0 },  // top
-                { row: 0, col: 1 },   // top-right
-                { row: 1, col: 1 },   // right
-                { row: 1, col: 0 },   // bottom
-                { row: 1, col: -1 },  // bottom-left
-                { row: 0, col: -1 }   // left
-            ];
-
-            // Check each possible neighbor position
-            neighborOffsets.forEach(offset => {
-                const neighborRow = row + offset.row;
-                const neighborCol = col + offset.col;
-
-                // Find the hexagon at this position
-                const neighbor = allHexagons.find(h => h.row === neighborRow && h.col === neighborCol);
-                
-                // If the neighbor exists and is a territory, add it to the neighbors list
-                if (neighbor && territories.some(t => t.id === neighbor.id)) {
-                    territory.neighbors.push(neighbor.id);
-                }
-            });
-        });
-    }
-
-    ensureConnectivity(territories) {
-        const visited = new Set();
-        const queue = [territories[0].id];
-        visited.add(territories[0].id);
-
-        while (queue.length > 0) {
-            const currentId = queue.shift();
-            const current = territories.find(t => t.id === currentId);
-
-            current.neighbors.forEach(neighborId => {
-                if (!visited.has(neighborId)) {
-                    visited.add(neighborId);
-                    queue.push(neighborId);
-                }
-            });
+            // Add small safety margin to boundary checks
+            if (cornerX < 5 || cornerX > this.width - 5 || cornerY < 5 || cornerY > this.height - 5) {
+                return false;
+            }
         }
-
-        // If any territory is not connected, add a connection to the nearest territory
-        territories.forEach(territory => {
-            if (!visited.has(territory.id)) {
-                const nearest = this.findNearestTerritory(territory, territories);
-                if (nearest) {
-                    territory.neighbors.push(nearest.id);
-                    nearest.neighbors.push(territory.id);
-                }
-            }
-        });
-
-        // Ensure each territory has at least one neighbor
-        territories.forEach(territory => {
-            if (territory.neighbors.length === 0) {
-                const nearest = this.findNearestTerritory(territory, territories);
-                if (nearest) {
-                    territory.neighbors.push(nearest.id);
-                    nearest.neighbors.push(territory.id);
-                }
-            }
-        });
+        
+        return true;
     }
 
-    findNearestTerritory(territory, territories) {
-        return territories.reduce((nearest, current) => {
-            if (current.id === territory.id) return nearest;
+    selectTerritories() {
+        // Select all hexes that are at least partially visible on the canvas
+        this.territories = this.territories
+            .map((hex, index) => ({
+                id: index + 1,
+                x: hex.x,
+                y: hex.y,
+                width: this.hexWidth,
+                height: this.hexHeight,
+                armies: 0,
+                owner: null,
+                neighbors: [],
+                getBounds() {
+                    return {
+                        x: this.x - this.width / 2,
+                        y: this.y - this.height / 2,
+                        width: this.width,
+                        height: this.height
+                    };
+                }
+            }))
+            .filter(hex =>
+                hex.x + this.hexWidth / 2 > 0 &&
+                hex.x - this.hexWidth / 2 < this.width &&
+                hex.y + this.hexHeight / 2 > 0 &&
+                hex.y - this.hexHeight / 2 < this.height
+            );
+    }
 
-            const dx = territory.centerX - current.centerX;
-            const dy = territory.centerY - current.centerY;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-
-            if (!nearest || distance < nearest.distance) {
-                return { ...current, distance };
+    calculateNeighbors() {
+        // Calculate neighbors based on hex grid positions
+        for (let i = 0; i < this.territories.length; i++) {
+            const t1 = this.territories[i];
+            for (let j = i + 1; j < this.territories.length; j++) {
+                const t2 = this.territories[j];
+                const dx = t1.x - t2.x;
+                const dy = t1.y - t2.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                // Adjust neighbor distance to ensure horizontal connections
+                // Using 1.1 times hexWidth to account for slight variations in positioning
+                if (distance <= this.hexWidth * 1.1) {
+                    t1.neighbors.push(t2.id);
+                    t2.neighbors.push(t1.id);
+                }
             }
-            return nearest;
-        }, null);
+        }
+    }
+
+    ensureConnectivity() {
+        this.calculateNeighbors();
+        
+        // Find any isolated territories
+        const isolated = this.territories.filter(t => t.neighbors.length === 0);
+        
+        // Connect isolated territories to their nearest neighbor
+        isolated.forEach(territory => {
+            let nearest = null;
+            let minDistance = Infinity;
+            
+            this.territories.forEach(other => {
+                if (other.id !== territory.id) {
+                    const dx = other.x - territory.x;
+                    const dy = other.y - territory.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        nearest = other;
+                    }
+                }
+            });
+            
+            if (nearest) {
+                territory.neighbors.push(nearest.id);
+                nearest.neighbors.push(territory.id);
+            }
+        });
     }
 }
 

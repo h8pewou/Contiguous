@@ -3,71 +3,67 @@ import { MapGenerator } from './map-generator.js';
 import { Renderer } from './renderer.js';
 import { AI } from './ai.js';
 
-// Initialize game
+// Initialize game components
 const canvas = document.getElementById('gameCanvas');
-const mapGenerator = new MapGenerator(canvas.width, canvas.height);
-const renderer = new Renderer(canvas);
-const ai = new AI();
+const mapGenerator = new MapGenerator();
+const renderer = new Renderer();
+const ai = new AI(game, mapGenerator, renderer);
 
-// Set up game state
+// Initialize game
 game.initialize(mapGenerator, renderer, ai);
 
+// Game loop
+function gameLoop() {
+    renderer.render(game.territories);
+    requestAnimationFrame(gameLoop);
+}
+
+// Start game loop
+gameLoop();
+
 // Handle window resize
+let resizeTimeout;
 window.addEventListener('resize', () => {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    mapGenerator.width = canvas.width;
-    mapGenerator.height = canvas.height;
-    game.initialize(mapGenerator, renderer, ai);
+    // Clear any existing timeout
+    if (resizeTimeout) {
+        clearTimeout(resizeTimeout);
+    }
+
+    // Set a new timeout to handle the resize after 250ms of no resize events
+    resizeTimeout = setTimeout(() => {
+        // Only update the renderer's scale and viewport
+        renderer.updateScale();
+        renderer.updateViewport();
+    }, 250);
 });
 
-// Handle canvas click
+// Handle canvas clicks
 canvas.addEventListener('click', (event) => {
     const rect = canvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
-    
-    // Find clicked territory
-    const clickedTerritory = game.territories.find(territory => {
-        const bounds = territory.getBounds();
-        return x >= bounds.x && x <= bounds.x + bounds.width &&
-               y >= bounds.y && y <= bounds.y + bounds.height;
-    });
+    const clickedTerritory = renderer.getTerritoryAt(x, y);
 
     if (clickedTerritory) {
-        if (game.currentPhase === 'reinforcement') {
-            if (clickedTerritory.owner === game.currentPlayer.id && game.availableReinforcements > 0) {
-                game.setArmies(clickedTerritory.id, clickedTerritory.armies + 1);
-                game.availableReinforcements--;
-                game.updateUI();
-                renderer.render();
-
-                // If no more reinforcements, switch to attack phase
-                if (game.availableReinforcements === 0) {
-                    game.currentPhase = 'attack';
-                    game.updateUI();
-                }
-            }
-        } else if (game.currentPhase === 'attack') {
+        if (game.currentPhase === 'attack') {
             if (!game.attackSource) {
                 if (clickedTerritory.owner === game.currentPlayer.id && clickedTerritory.armies > 1) {
                     game.attackSource = clickedTerritory.id;
-                    renderer.render();
+                    renderer.setAttackSource(clickedTerritory.id);
                 }
             } else {
                 if (game.canAttack(game.attackSource, clickedTerritory.id)) {
                     const success = game.resolveCombat(game.attackSource, clickedTerritory.id);
-                    renderer.showAttackAnimation(game.attackSource, clickedTerritory.id, success);
-                    game.attackSource = null;
-                    renderer.render();
-
-                    // Check for win condition
-                    const winner = game.checkWinCondition();
-                    if (winner) {
-                        alert(`Game Over! ${winner.isAI ? 'AI' : 'Player'} ${winner.id} wins!`);
-                        game.initialize(mapGenerator, renderer, ai);
+                    if (success) {
+                        const winner = game.checkWinCondition();
+                        if (winner) {
+                            alert(`Player ${winner.id} wins!`);
+                            game.initialize(mapGenerator, renderer, ai);
+                        }
                     }
                 }
+                game.attackSource = null;
+                renderer.setAttackSource(null);
             }
         }
     }
@@ -75,24 +71,35 @@ canvas.addEventListener('click', (event) => {
 
 // Handle end turn button
 document.getElementById('end-turn-btn').addEventListener('click', () => {
-    if (game.currentPhase === 'attack') {
-        game.nextTurn();
-        renderer.render();
-
-        // If next player is AI, make their move
-        if (game.currentPlayer.isAI) {
-            setTimeout(() => {
-                ai.makeMove();
-                renderer.render();
-            }, 1000);
-        }
+    game.nextTurn();
+    
+    if (game.currentPlayer.isAI) {
+        ai.makeMove();
+    } else {
+        // Automate reinforcements for human player
+        automateHumanReinforcements();
     }
 });
 
-// Start game loop
-function gameLoop() {
-    renderer.render();
-    requestAnimationFrame(gameLoop);
+// Function to automate human player reinforcements
+function automateHumanReinforcements() {
+    if (game.currentPhase === 'reinforcement' && !game.currentPlayer.isAI) {
+        const playerTerritories = game.territories.filter(t => t.owner === game.currentPlayer.id);
+        
+        // Randomly distribute reinforcements
+        while (game.availableReinforcements > 0) {
+            const randomIndex = Math.floor(Math.random() * playerTerritories.length);
+            const territory = playerTerritories[randomIndex];
+            game.setArmies(territory.id, territory.armies + 1);
+            game.availableReinforcements--;
+        }
+        
+        // Update UI and switch to attack phase
+        game.updateUI();
+        game.currentPhase = 'attack';
+        game.updateUI();
+    }
 }
 
-gameLoop(); 
+// Automate initial reinforcements for human player
+automateHumanReinforcements(); 
