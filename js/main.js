@@ -44,30 +44,103 @@ canvas.addEventListener('click', (event) => {
     const y = event.clientY - rect.top;
     const clickedTerritory = renderer.getTerritoryAt(x, y);
 
-    if (clickedTerritory) {
-        if (game.currentPhase === 'attack') {
-            if (!game.attackSource) {
-                if (clickedTerritory.owner === game.currentPlayer.id && clickedTerritory.armies > 1) {
-                    game.attackSource = clickedTerritory.id;
-                    renderer.setAttackSource(clickedTerritory.id);
-                }
-            } else {
-                if (game.canAttack(game.attackSource, clickedTerritory.id)) {
-                    const success = game.resolveCombat(game.attackSource, clickedTerritory.id);
+    handleTerritoryClick(clickedTerritory);
+});
+
+function handleTerritoryClick(territory) {
+    if (!territory) return;
+
+    if (game.currentPhase === 'attack' && game.currentPlayer.id === 1) {
+        if (!renderer.attackSource) {
+            // First click - select source territory
+            if (territory.owner === 1 && territory.armies > 1) {
+                renderer.attackSource = territory.id;
+                renderer.render(game.territories);
+            }
+        } else {
+            // Second click - attack target territory
+            const sourceTerritory = game.territories.find(t => t.id === renderer.attackSource);
+            if (sourceTerritory && sourceTerritory.neighbors.includes(territory.id)) {
+                if (territory.owner !== 1) {
+                    // Calculate number of dice for attacker and defender
+                    const attackerDice = Math.min(3, sourceTerritory.armies - 1);
+                    const defenderDice = Math.min(2, territory.armies);
+
+                    console.log(`Attacker armies: ${sourceTerritory.armies}, rolling ${attackerDice} dice`);
+                    console.log(`Defender armies: ${territory.armies}, rolling ${defenderDice} dice`);
+
+                    // Roll dice for attacker
+                    const attackerRolls = [];
+                    for (let i = 0; i < attackerDice; i++) {
+                        const roll = Math.floor(Math.random() * 6) + 1;
+                        attackerRolls.push(roll);
+                        console.log(`Attacker roll ${i + 1}: ${roll}`);
+                    }
+                    attackerRolls.sort((a, b) => b - a);
+
+                    // Roll dice for defender
+                    const defenderRolls = [];
+                    for (let i = 0; i < defenderDice; i++) {
+                        const roll = Math.floor(Math.random() * 6) + 1;
+                        defenderRolls.push(roll);
+                        console.log(`Defender roll ${i + 1}: ${roll}`);
+                    }
+                    defenderRolls.sort((a, b) => b - a);
+
+                    // Calculate bonuses
+                    const attackerBonus = Math.floor(sourceTerritory.armies / 3);
+                    const defenderBonus = Math.floor(territory.armies / 2);
+
+                    console.log(`Attacker bonus: ${attackerBonus}`);
+                    console.log(`Defender bonus: ${defenderBonus}`);
+
+                    // Calculate total for each side by summing all dice and adding bonus
+                    const attackerTotal = attackerRolls.reduce((sum, roll) => sum + roll, 0) + attackerBonus;
+                    const defenderTotal = defenderRolls.reduce((sum, roll) => sum + roll, 0) + defenderBonus;
+                    const success = attackerTotal > defenderTotal;
+
+                    console.log(`Final comparison: ${attackerTotal} vs ${defenderTotal}`);
+                    console.log(`Battle result: ${success ? 'Attacker wins' : 'Defender wins'}`);
+
+                    // Show attack animation with battle info
+                    renderer.showAttackAnimation(
+                        sourceTerritory.id,
+                        territory.id,
+                        success,
+                        attackerRolls,
+                        defenderRolls,
+                        attackerBonus,
+                        defenderBonus
+                    );
+
                     if (success) {
-                        const winner = game.checkWinCondition();
-                        if (winner) {
-                            alert(`Player ${winner.id} wins!`);
-                            game.initialize(mapGenerator, renderer, ai);
+                        // Transfer territory
+                        territory.owner = 1;
+                        territory.armies = 1;
+                        sourceTerritory.armies--;
+                    } else {
+                        // Defender wins
+                        territory.armies--;
+                        if (territory.armies <= 0) {
+                            territory.owner = 1;
+                            territory.armies = 1;
+                            sourceTerritory.armies--;
                         }
                     }
+
+                    // Check win condition
+                    const winner = game.checkWinCondition();
+                    if (winner) {
+                        alert(`Player ${winner.id} wins!`);
+                        game.initialize(mapGenerator, renderer, ai);
+                    }
                 }
-                game.attackSource = null;
-                renderer.setAttackSource(null);
             }
+            renderer.attackSource = null;
+            renderer.render(game.territories);
         }
     }
-});
+}
 
 // Handle end turn button
 document.getElementById('end-turn-btn').addEventListener('click', () => {
